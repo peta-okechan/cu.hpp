@@ -185,6 +185,16 @@ namespace cu {
     }
     
     /*
+     cuCtxGetCacheConfig wrapper
+     */
+    CUfunc_cache GetCtxCacheConfig()
+    {
+        CUfunc_cache config;
+        Error::Check(cuCtxGetCacheConfig(&config));
+        return config;
+    }
+    
+    /*
      cuCtxSynchronize wrapper
      */
     void CtxSynchronize()
