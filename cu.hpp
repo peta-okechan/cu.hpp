@@ -195,6 +195,16 @@ namespace cu {
     }
     
     /*
+     cuCtxGetCurrent wrapper
+     */
+    CUcontext GetCtxCurrent()
+    {
+        CUcontext ctx;
+        Error::Check(cuCtxGetCurrent(&ctx));
+        return ctx;
+    }
+    
+    /*
      cuCtxSynchronize wrapper
      */
     void CtxSynchronize()
@@ -273,6 +283,10 @@ namespace cu {
         {
             Error::Check(cuCtxCreate(&ctx, flags, device()));
         }
+        
+        Context(const CUcontext &_ctx)
+        : ctx(_ctx)
+        {}
         
         ~Context()
         {
