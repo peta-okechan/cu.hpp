@@ -43,7 +43,7 @@ int main(int argc, const char * argv[])
         // デバイス名の表示
         std::cout << devices.size() << " device(s) found.\n";
         for (auto d : devices) {
-            std::cout << "    " << d.getName() << "\n";
+            std::cout << "  Name: " << d.getName() << ", Memory: " << d.getTotalMemBytes() / 1024 / 1024 << " MB\n";
         }
         
         // コンテキストの作成

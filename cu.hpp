@@ -219,6 +219,13 @@ namespace cu {
             return std::string(name);
         }
         
+        size_t getTotalMemBytes()
+        {
+            size_t bytes = 0;
+            Error::Check(cuDeviceTotalMem(&bytes, device));
+            return bytes;
+        }
+        
         template<CUdevice_attribute attr>
         int getAttribute()
         {
