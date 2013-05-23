@@ -274,6 +274,13 @@ namespace cu {
             return ctx;
         }
         
+        unsigned int getApiVersion()
+        {
+            unsigned int version;
+            Error::Check(cuCtxGetApiVersion(ctx, &version));
+            return version;
+        }
+        
         void getMemInfo(size_t &memFree, size_t &memTotal) const
         {
             Error::Check(cuMemGetInfo(&memFree, &memTotal));

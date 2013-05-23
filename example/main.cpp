@@ -49,6 +49,9 @@ int main(int argc, const char * argv[])
         // コンテキストの作成
         cu::Context context(devices[0]);
         
+        // APIバージョンの表示
+        std::cout << "API version: " << context.getApiVersion() << "\n";
+        
         // メモリ利用状況の表示
         size_t memFree, memTotal;
         context.getMemInfo(memFree, memTotal);
