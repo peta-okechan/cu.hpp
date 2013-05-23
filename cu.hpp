@@ -205,6 +205,16 @@ namespace cu {
     }
     
     /*
+     cuCtxGetDevice wrapper
+     */
+    CUdevice GetCtxDevice()
+    {
+        CUdevice dev;
+        Error::Check(cuCtxGetDevice(&dev));
+        return dev;
+    }
+    
+    /*
      cuCtxSynchronize wrapper
      */
     void CtxSynchronize()
