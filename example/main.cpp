@@ -72,7 +72,7 @@ int main(int argc, const char * argv[])
         return EXIT_SUCCESS;
         
     } catch (cu::Error e) {
-        std::cout << e.string() << "\n";
+        std::cout << e.what() << "\n";
     }
     
     return EXIT_FAILURE;

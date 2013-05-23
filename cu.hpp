@@ -144,6 +144,11 @@ namespace cu {
         
         ~Error() throw() {}
         
+        const char* what() const throw()
+        {
+            return _errString.c_str();
+        }
+        
         std::string string() const throw()
         {
             return _errString;
