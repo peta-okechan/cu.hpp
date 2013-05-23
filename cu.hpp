@@ -30,6 +30,7 @@
 #include <string>
 #include <sstream>
 #include <vector>
+#include <unordered_map>
 #include <CUDA/CUDA.h>
 
 namespace cu {
@@ -215,6 +216,60 @@ namespace cu {
     }
     
     /*
+     cuCtxGetLimit wrapper
+     */
+    template<CUlimit limit>
+    size_t GetCtxLimit()
+    {
+        size_t pvalue;
+        Error::Check(cuCtxGetLimit(&pvalue, limit));
+        return pvalue;
+    }
+    
+    /*
+     cuCtxGetSharedMemConfig wrapper
+     */
+    CUsharedconfig GetCtxSharedMemConfig()
+    {
+        CUsharedconfig pconfig;
+        Error::Check(cuCtxGetSharedMemConfig(&pconfig));
+        return pconfig;
+    }
+    
+    /*
+     cuCtxSetCacheConfig wrapper
+     */
+    void SetCtxCacheConfig(CUfunc_cache config)
+    {
+        Error::Check(cuCtxSetCacheConfig(config));
+    }
+    
+    /*
+     cuCtxSetCurrent wrapper
+     */
+    void SetCtxCurrent(CUcontext ctx)
+    {
+        Error::Check(cuCtxSetCurrent(ctx));
+    }
+    
+    /*
+     cuCtxSetLimit wrapper
+     */
+    template<CUlimit limit>
+    void SetCtxLimit(size_t value)
+    {
+        Error::Check(cuCtxSetLimit(limit, value));
+    }
+    
+    /*
+     cuCtxSetSharedMemConfig wrapper
+     */
+    void SetCtxSharedMemConfig(CUsharedconfig config)
+    {
+        Error::Check(cuCtxSetSharedMemConfig(config));
+    }
+    
+    /*
      cuCtxSynchronize wrapper
      */
     void CtxSynchronize()
@@ -287,25 +342,138 @@ namespace cu {
     class Context
     {
     private:
+        class Manager
+        {
+            friend class Context;
+        private:
+            std::unordered_map<CUcontext, unsigned int> ctxRefCount;
+            
+            static Manager* GetInstance()
+            {
+                static Manager *m = nullptr;
+                if (!m) m = new Manager();
+                return m;
+            }
+            
+            Manager() {}
+            
+            ~Manager() {}
+            
+            unsigned int incl(const CUcontext &ctx)
+            {
+                ctxRefCount[ctx] += 1;
+                return ctxRefCount[ctx];
+            }
+            
+            unsigned int decl(const CUcontext &ctx)
+            {
+                if (ctxRefCount[ctx] > 0) {
+                    ctxRefCount[ctx] -= 1;
+                }
+                return ctxRefCount[ctx];
+            }
+        };
+        
         CUcontext ctx;
+        
+        Context(const CUcontext &_ctx)
+        : ctx(_ctx)
+        {
+            Manager::GetInstance()->incl(ctx);
+        }
+        
     public:
         Context(Device device, unsigned int flags = CU_CTX_SCHED_AUTO)
         {
             Error::Check(cuCtxCreate(&ctx, flags, device()));
+            Manager::GetInstance()->incl(ctx);
         }
         
-        Context(const CUcontext &_ctx)
-        : ctx(_ctx)
+        Context(const Context& _context)
+        : Context(_context())
         {}
         
         ~Context()
         {
-            Error::Check(cuCtxDestroy(ctx));
+            if (Manager::GetInstance()->decl(ctx) == 0) {
+                Error::Check(cuCtxDestroy(ctx));
+            }
+        }
+        
+        bool operator==(const Context &rhs) const
+        {
+            return (ctx == rhs());
         }
         
         CUcontext operator()(void) const
         {
             return ctx;
+        }
+        
+        CUfunc_cache getCacheConfig()
+        {
+            CUfunc_cache config;
+            Context::push(*this);
+            Error::Check(cuCtxGetCacheConfig(&config));
+            Context::pop();
+            return config;
+        }
+        
+        Device getDevice()
+        {
+            CUdevice dev;
+            Context::push(*this);
+            Error::Check(cuCtxGetDevice(&dev));
+            Context::pop();
+            return Device(dev);
+        }
+        
+        template<CUlimit limit>
+        size_t getLimit()
+        {
+            size_t pvalue;
+            Context::push(*this);
+            Error::Check(cuCtxGetLimit(&pvalue, limit));
+            Context::pop();
+            return pvalue;
+        }
+        
+        CUsharedconfig getSharedMemConfig()
+        {
+            CUsharedconfig pconfig;
+            Context::push(*this);
+            Error::Check(cuCtxGetSharedMemConfig(&pconfig));
+            Context::pop();
+            return pconfig;
+        }
+        
+        void setCacheConfig(CUfunc_cache config)
+        {
+            Context::push(*this);
+            Error::Check(cuCtxSetCacheConfig(config));
+            Context::pop();
+        }
+        
+        template<CUlimit limit>
+        void setLimit(size_t value)
+        {
+            Context::push(*this);
+            Error::Check(cuCtxSetLimit(limit, value));
+            Context::pop();
+        }
+        
+        void getSharedMemConfig(CUsharedconfig config)
+        {
+            Context::push(*this);
+            Error::Check(cuCtxSetSharedMemConfig(config));
+            Context::pop();
+        }
+        
+        void synchronize()
+        {
+            Context::push(*this);
+            Error::Check(cuCtxSynchronize());
+            Context::pop();
         }
         
         unsigned int getApiVersion()
@@ -317,7 +485,33 @@ namespace cu {
         
         void getMemInfo(size_t &memFree, size_t &memTotal) const
         {
+            Context::push(*this);
             Error::Check(cuMemGetInfo(&memFree, &memTotal));
+            Context::pop();
+        }
+        
+        static void push(const Context &context)
+        {
+            Error::Check(cuCtxPushCurrent(context()));
+        }
+        
+        static Context pop()
+        {
+            CUcontext ret;
+            Error::Check(cuCtxPopCurrent(&ret));
+            return Context(ret);
+        }
+        
+        static Context getCurrent()
+        {
+            CUcontext ctx;
+            Error::Check(cuCtxGetCurrent(&ctx));
+            return Context(ctx);
+        }
+        
+        static void setCurrent(const Context &_context)
+        {
+            Error::Check(cuCtxSetCurrent(_context()));
         }
     };
     
