@@ -201,6 +201,14 @@ namespace cu {
             return device;
         }
         
+        template<CUdevice_attribute attr>
+        int getAttribute()
+        {
+            int ret = 0;
+            Error::Check(cuDeviceGetAttribute(&ret, attr, device));
+            return ret;
+        }
+        
         static std::vector<Device> GetDevices()
         {
             int count = 0;
