@@ -211,6 +211,14 @@ namespace cu {
             return device;
         }
         
+        std::string getName()
+        {
+            char name[100];
+            int len = 100;
+            Error::Check(cuDeviceGetName(name, len, device));
+            return std::string(name);
+        }
+        
         template<CUdevice_attribute attr>
         int getAttribute()
         {

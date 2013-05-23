@@ -40,6 +40,12 @@ int main(int argc, const char * argv[])
             return EXIT_FAILURE;
         }
         
+        // デバイス名の表示
+        std::cout << devices.size() << " device(s) found.\n";
+        for (auto d : devices) {
+            std::cout << "    " << d.getName() << "\n";
+        }
+        
         // コンテキストの作成
         cu::Context context(devices[0]);
         
