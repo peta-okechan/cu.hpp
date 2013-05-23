@@ -55,9 +55,19 @@ int main(int argc, const char * argv[])
         cu::Memory dData(sizeof(float) * hData.size());
         dData.copyFrom(hData);
         
+        // 処理時間を計測
+        cu::Timer timer;
+        timer.start();
+        
         // カーネルの実行
         addone.setArg(dData).setArg(n);
         addone.launchKernel(gridDim, blockDim);
+        
+        // 処理時間を表示
+        timer.stop();
+        std::cout.setf(std::ios_base::fixed, std::ios_base::floatfield);
+        std::cout << "Kernel execution time: " << timer.elapsedMilliSec() / 1000.0f << " sec.\n";
+        std::cout.setf(std::ios_base::fmtflags(0), std::ios_base::floatfield);
         
         // 結果をデバイスからホストへコピー
         dData.copyTo(hData);

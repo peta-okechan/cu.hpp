@@ -138,7 +138,7 @@ namespace cu {
         CUresult _err;
         std::string _errString;
     public:
-        Error(CUresult err, const std::string &errString = nullptr)
+        Error(CUresult err, const std::string &errString = nullptr) throw()
         : _err(err), _errString(errString)
         {}
         
