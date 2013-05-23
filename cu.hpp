@@ -175,6 +175,16 @@ namespace cu {
     }
     
     /*
+     cuDriverGetVersion wrapper
+     */
+    int GetDriverVersion()
+    {
+        int ret = 0;
+        Error::Check(cuDriverGetVersion(&ret));
+        return ret;
+    }
+    
+    /*
      cuCtxSynchronize wrapper
      */
     void CtxSynchronize()

@@ -30,6 +30,9 @@ int main(int argc, const char * argv[])
         // CUDAの初期化
         cu::Init();
         
+        // ドライババージョンの表示
+        std::cout << "CUDA driver version: " << cu::GetDriverVersion() << "\n";
+        
         // CUDAデバイスを取得
         auto devices = cu::Device::GetDevices();
         if (devices.size() == 0) {
