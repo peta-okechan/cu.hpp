@@ -35,6 +35,18 @@
 
 namespace cu {
     
+#ifdef CU_RESOURCE_LEAK_CHECK
+    enum {
+        RES_CREATE,
+        RES_RELEASE,
+    };
+    long RLC_context[] = {0, 0};
+    long RLC_module[] = {0, 0};
+    long RLC_deviceptr[] = {0, 0};
+    long RLC_array[] = {0, 0};
+    long RLC_event[] = {0, 0};
+#endif
+    
     /*
      Dimension
      for gridDim and blockDim
@@ -226,30 +238,45 @@ namespace cu {
     void Release<CUcontext>(const CUcontext context)
     {
         Error::Check(cuCtxDestroy(context));
+#ifdef CU_RESOURCE_LEAK_CHECK
+        RLC_context[RES_RELEASE]++;
+#endif
     }
     
     template<>
     void Release<CUmodule>(const CUmodule mod)
     {
         Error::Check(cuModuleUnload(mod));
+#ifdef CU_RESOURCE_LEAK_CHECK
+        RLC_module[RES_RELEASE]++;
+#endif
     }
     
     template<>
     void Release<CUdeviceptr>(const CUdeviceptr ptr)
     {
         Error::Check(cuMemFree(ptr));
+#ifdef CU_RESOURCE_LEAK_CHECK
+        RLC_deviceptr[RES_RELEASE]++;
+#endif
     }
     
     template<>
     void Release<CUarray>(const CUarray handle)
     {
         Error::Check(cuArrayDestroy(handle));
+#ifdef CU_RESOURCE_LEAK_CHECK
+        RLC_array[RES_RELEASE]++;
+#endif
     }
     
     template<>
     void Release<CUevent>(const CUevent e)
     {
         Error::Check(cuEventDestroy(e));
+#ifdef CU_RESOURCE_LEAK_CHECK
+        RLC_event[RES_RELEASE]++;
+#endif
     }
     
     /*
@@ -483,6 +510,9 @@ namespace cu {
         Context(Device device, unsigned int flags = CU_CTX_SCHED_AUTO)
         {
             Error::Check(cuCtxCreate(&ctx, flags, device()));
+#ifdef CU_RESOURCE_LEAK_CHECK
+            RLC_context[RES_CREATE]++;
+#endif
             Manager::GetInstance()->retain(ctx);
         }
         
@@ -639,6 +669,9 @@ namespace cu {
         {
             CUmodule mod;
             Error::Check(cuModuleLoad(&mod, modulePath.c_str()));
+#ifdef CU_RESOURCE_LEAK_CHECK
+            RLC_module[RES_CREATE]++;
+#endif
             return Module(mod);
         }
         
@@ -646,6 +679,9 @@ namespace cu {
         {
             CUmodule mod;
             Error::Check(cuModuleLoadData(&mod, image));
+#ifdef CU_RESOURCE_LEAK_CHECK
+            RLC_module[RES_CREATE]++;
+#endif
             return Module(mod);
         }
         
@@ -653,6 +689,9 @@ namespace cu {
         {
             CUmodule mod;
             Error::Check(cuModuleLoadFatBinary(&mod, fatCubin));
+#ifdef CU_RESOURCE_LEAK_CHECK
+            RLC_module[RES_CREATE]++;
+#endif
             return Module(mod);
         }
     };
@@ -671,6 +710,9 @@ namespace cu {
         : byteCount(_byteCount)
         {
             Error::Check(cuMemAlloc(&ptr, byteCount));
+#ifdef CU_RESOURCE_LEAK_CHECK
+            RLC_deviceptr[RES_CREATE]++;
+#endif
             Manager::GetInstance()->retain(ptr);
         }
         
@@ -763,10 +805,16 @@ namespace cu {
                     CUDA_ARRAY3D_DESCRIPTOR desc;
                     getDescriptor(desc);
                     Error::Check(cuArray3DCreate(&handle, &desc));
+#ifdef CU_RESOURCE_LEAK_CHECK
+                    RLC_array[RES_CREATE]++;
+#endif
                 } else {
                     CUDA_ARRAY_DESCRIPTOR desc;
                     getDescriptor(desc);
                     Error::Check(cuArrayCreate(&handle, &desc));
+#ifdef CU_RESOURCE_LEAK_CHECK
+                    RLC_array[RES_CREATE]++;
+#endif
                 }
             }
             
@@ -1049,6 +1097,9 @@ namespace cu {
         Event(unsigned int flags = CU_EVENT_DEFAULT)
         {
             Error::Check(cuEventCreate(&e, flags));
+#ifdef CU_RESOURCE_LEAK_CHECK
+            RLC_event[RES_CREATE]++;
+#endif
             Manager::GetInstance()->retain(e);
         }
         

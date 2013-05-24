@@ -7,9 +7,11 @@
 //
 
 #include <iostream>
+
+#define CU_RESOURCE_LEAK_CHECK
 #include "cu.hpp"
 
-int main(int argc, const char * argv[])
+int test()
 {
     // データ数
     int n = 1000;
@@ -112,4 +114,17 @@ int main(int argc, const char * argv[])
     }
     
     return EXIT_FAILURE;
+}
+
+int main(int argc, const char * argv[])
+{
+    int ret = test();
+#ifdef CU_RESOURCE_LEAK_CHECK
+    std::cout << "Context CREATE: " << cu::RLC_context[cu::RES_CREATE] << ", RELEASE: " << cu::RLC_context[cu::RES_RELEASE] << "\n";
+    std::cout << "Module CREATE: " << cu::RLC_module[cu::RES_CREATE] << ", RELEASE: " << cu::RLC_module[cu::RES_RELEASE] << "\n";
+    std::cout << "Deviceptr CREATE: " << cu::RLC_deviceptr[cu::RES_CREATE] << ", RELEASE: " << cu::RLC_deviceptr[cu::RES_RELEASE] << "\n";
+    std::cout << "Array CREATE: " << cu::RLC_array[cu::RES_CREATE] << ", RELEASE: " << cu::RLC_array[cu::RES_RELEASE] << "\n";
+    std::cout << "Event CREATE: " << cu::RLC_event[cu::RES_CREATE] << ", RELEASE: " << cu::RLC_event[cu::RES_RELEASE] << "\n";
+#endif
+    return ret;
 }
