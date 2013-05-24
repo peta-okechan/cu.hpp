@@ -566,13 +566,13 @@ namespace cu {
         typedef ResourceManager<CUmodule> Manager;
     private:
         CUmodule mod;
-    public:
-        Module(const std::string modulePath)
+        
+        Module(const CUmodule _mod)
+        : mod(_mod)
         {
-            Error::Check(cuModuleLoad(&mod, modulePath.c_str()));
             Manager::GetInstance()->retain(mod);
         }
-        
+    public:        
         ~Module()
         {
             Manager::GetInstance()->release(mod);
@@ -581,6 +581,27 @@ namespace cu {
         CUmodule operator()(void) const
         {
             return mod;
+        }
+        
+        static Module LoadFromFile(const std::string modulePath)
+        {
+            CUmodule mod;
+            Error::Check(cuModuleLoad(&mod, modulePath.c_str()));
+            return Module(mod);
+        }
+        
+        static Module LoadFromImage(const void* image)
+        {
+            CUmodule mod;
+            Error::Check(cuModuleLoadData(&mod, image));
+            return Module(mod);
+        }
+        
+        static Module LoadFromFatBinary(const void* fatCubin)
+        {
+            CUmodule mod;
+            Error::Check(cuModuleLoadFatBinary(&mod, fatCubin));
+            return Module(mod);
         }
     };
     

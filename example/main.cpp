@@ -58,7 +58,7 @@ int main(int argc, const char * argv[])
         std::cout << "Memory: total " << memTotal / 1024 / 1024 << "MB, free " << memFree / 1024 / 1024 << "MB\n";
         
         // モジュールのロード
-        cu::Module mod("kernel.ptx");
+        cu::Module mod = cu::Module::LoadFromFile("kernel.ptx");
         
         // カーネルの取得
         cu::Function addone(mod, "addone");
