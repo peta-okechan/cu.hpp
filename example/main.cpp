@@ -65,12 +65,12 @@ int main(int argc, const char * argv[])
         
         // デバイスメモリにデータ領域を確保してホストからデータをコピー
         cu::Memory dData(sizeof(float) * hData.size());
-        dData.copyFrom(hData);
+        cu::Memcpy(dData, hData);
         
         // モジュールのグローバル変数のポインタを取得しホストからデータからコピー
         cu::Memory dOnes(mod, "ones");
         std::vector<float> hOnes = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
-        dOnes.copyFrom(hOnes);
+        cu::Memcpy(dOnes, hOnes);
         
         // 処理時間を計測
         cu::Timer timer;
@@ -87,7 +87,7 @@ int main(int argc, const char * argv[])
         std::cout.setf(std::ios_base::fmtflags(0), std::ios_base::floatfield);
         
         // 結果をデバイスからホストへコピー
-        dData.copyTo(hData);
+        cu::Memcpy(hData, dData);
         
         // 結果の表示
         std::cout << "Result: " << n << " elements\n";

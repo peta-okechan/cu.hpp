@@ -168,6 +168,52 @@ namespace cu {
     };
     
     /*
+     Format size
+     */
+    size_t FormatSize(const CUarray_format fmt)
+    {
+        size_t csize = 0;
+        switch (fmt) {
+            case CU_AD_FORMAT_UNSIGNED_INT8:
+                csize = sizeof(uint8_t);
+                break;
+                
+            case CU_AD_FORMAT_UNSIGNED_INT16:
+                csize = sizeof(uint16_t);
+                break;
+                
+            case CU_AD_FORMAT_UNSIGNED_INT32:
+                csize = sizeof(uint32_t);
+                break;
+                
+            case CU_AD_FORMAT_SIGNED_INT8:
+                csize = sizeof(int8_t);
+                break;
+                
+            case CU_AD_FORMAT_SIGNED_INT16:
+                csize = sizeof(int16_t);
+                break;
+                
+            case CU_AD_FORMAT_SIGNED_INT32:
+                csize = sizeof(int32_t);
+                break;
+                
+            case CU_AD_FORMAT_HALF:
+                csize = sizeof(float) / 2;
+                break;
+                
+            case CU_AD_FORMAT_FLOAT:
+                csize = sizeof(float);
+                break;
+                
+            default:
+                throw Error(CUDA_ERROR_UNKNOWN, "Invalid format.");
+                break;
+        }
+        return csize;
+    }
+    
+    /*
      Resource release templates. 
      */
     template<typename T>
@@ -192,6 +238,12 @@ namespace cu {
     void Release<CUdeviceptr>(const CUdeviceptr ptr)
     {
         Error::Check(cuMemFree(ptr));
+    }
+    
+    template<>
+    void Release<CUarray>(const CUarray handle)
+    {
+        Error::Check(cuArrayDestroy(handle));
     }
     
     template<>
@@ -647,43 +699,254 @@ namespace cu {
             return &ptr;
         }
         
-        size_t size(void) const
+        size_t getTotalBytes(void) const
         {
             return byteCount;
         }
-        
-        void copyFrom(void* srcHost)
+    };
+    
+    /*
+     CUarray wrapper
+     */
+    class Array
+    {
+        typedef ResourceManager<CUarray> Manager;
+    private:
+        class Descriptor
         {
-            Error::Check(cuMemcpyHtoD(ptr, srcHost, byteCount));
+        private:
+            bool is3D;
+            size_t width, height, depth;
+            CUarray_format format;
+            unsigned int numChannels, flags;
+        public:
+            Descriptor(const bool _is3D, const size_t _width, const size_t _height, const size_t _depth, const CUarray_format _format, const unsigned int _numChannels, const unsigned int _flags)
+            : is3D(_is3D), width(_width), height(_height), depth(_depth), format(_format), numChannels(_numChannels), flags(_flags)
+            {}
+            
+            Descriptor(const CUDA_ARRAY_DESCRIPTOR &desc)
+            : is3D(false), width(desc.Width), height(desc.Height), depth(1), format(desc.Format), numChannels(desc.NumChannels), flags(0)
+            {}
+            
+            Descriptor(const CUDA_ARRAY3D_DESCRIPTOR &desc)
+            : is3D(false), width(desc.Width), height(desc.Height), depth(desc.Depth), format(desc.Format), numChannels(desc.NumChannels), flags(desc.Flags)
+            {}
+            
+            size_t getTotalBytes() const
+            {
+                return FormatSize(format) * numChannels * width * height * depth;
+            }
+            
+            void getDescriptor(CUDA_ARRAY_DESCRIPTOR &desc) const
+            {
+                if (is3D) throw Error(CUDA_ERROR_UNKNOWN, "This is not 1D or 2D descriptor.");
+                desc.Width = width;
+                desc.Height = height;
+                desc.Format = format;
+                desc.NumChannels = numChannels;
+            }
+            
+            void getDescriptor(CUDA_ARRAY3D_DESCRIPTOR &desc) const
+            {
+                if (!is3D) throw Error(CUDA_ERROR_UNKNOWN, "This is not 3D descriptor.");
+                desc.Width = width;
+                desc.Height = height;
+                desc.Depth = depth;
+                desc.Format = format;
+                desc.NumChannels = numChannels;
+                desc.Flags = flags;
+            }
+            
+            void arrayCreate(CUarray &handle)
+            {
+                if (is3D) {
+                    CUDA_ARRAY3D_DESCRIPTOR desc;
+                    getDescriptor(desc);
+                    Error::Check(cuArray3DCreate(&handle, &desc));
+                } else {
+                    CUDA_ARRAY_DESCRIPTOR desc;
+                    getDescriptor(desc);
+                    Error::Check(cuArrayCreate(&handle, &desc));
+                }
+            }
+            
+            void update(const CUarray handle)
+            {
+                if (is3D) {
+                    CUDA_ARRAY3D_DESCRIPTOR _desc;
+                    Error::Check(cuArray3DGetDescriptor(&_desc, handle));
+                    width = _desc.Width;
+                    height = _desc.Height;
+                    format = _desc.Format;
+                    numChannels = _desc.NumChannels;
+                    depth = _desc.Depth;
+                    flags = _desc.Flags;
+                } else {
+                    CUDA_ARRAY_DESCRIPTOR _desc;
+                    Error::Check(cuArrayGetDescriptor(&_desc, handle));
+                    width = _desc.Width;
+                    height = _desc.Height;
+                    format = _desc.Format;
+                    numChannels = _desc.NumChannels;
+                }
+            }
+        };
+        
+        CUarray handle;
+        Descriptor desc;
+    public:
+        Array(const Descriptor &_desc)
+        : desc(_desc)
+        {
+            desc.arrayCreate(handle);
+            Manager::GetInstance()->retain(handle);
         }
         
-        void copyFrom(void* srcHost, size_t _byteCount)
+        ~Array()
         {
-            Error::Check(cuMemcpyHtoD(ptr, srcHost, _byteCount));
+            Manager::GetInstance()->release(handle);
         }
         
-        template<typename T>
-        void copyFrom(const std::vector<T> &_vector)
+        CUarray operator()(void) const
         {
-            Error::Check(cuMemcpyHtoD(ptr, _vector.data(), sizeof(T) * _vector.size()));
+            return handle;
         }
         
-        void copyTo(void* dstHost)
+        CUarray* operator()(void)
         {
-            Error::Check(cuMemcpyDtoH(dstHost, ptr, byteCount));
+            return &handle;
         }
         
-        void copyTo(void* dstHost, size_t _byteCount)
+        Descriptor getDescriptor(const bool useCache = true)
         {
-            Error::Check(cuMemcpyDtoH(dstHost, ptr, _byteCount));
+            if (!useCache) {
+                desc.update(handle);
+            }
+            return desc;
         }
         
-        template<typename T>
-        void copyTo(std::vector<T> &_vector) const
+        size_t getTotalBytes() const
         {
-            Error::Check(cuMemcpyDtoH(_vector.data(), ptr, sizeof(T) * _vector.size()));
+            return desc.getTotalBytes();
+        }
+        
+        static Array Create1D(const CUarray_format Format, const unsigned int NumChannels, const unsigned int width)
+        {
+            CUDA_ARRAY_DESCRIPTOR desc;
+            desc.Width = width;
+            desc.Height = 1;
+            desc.Format = Format;
+            desc.NumChannels = NumChannels;
+            return Array(Descriptor(desc));
+        }
+        
+        static Array Create2D(const CUarray_format Format, const unsigned int NumChannels, const unsigned int width, const unsigned int height)
+        {
+            CUDA_ARRAY_DESCRIPTOR desc;
+            desc.Width = width;
+            desc.Height = height;
+            desc.Format = Format;
+            desc.NumChannels = NumChannels;
+            return Array(Descriptor(desc));
+        }
+        
+        static Array Create3D(const CUarray_format Format, const unsigned int NumChannels, const unsigned int width, const unsigned int height, const unsigned int depth, unsigned int flags)
+        {
+            CUDA_ARRAY3D_DESCRIPTOR desc;
+            desc.Width = width;
+            desc.Height = height;
+            desc.Depth = depth;
+            desc.Format = Format;
+            desc.NumChannels = NumChannels;
+            desc.Flags = flags;
+            return Array(Descriptor(desc));
         }
     };
+    
+    /*
+     cuMemcpyAto* wrapper
+     */
+    void Memcpy(Array &dst, const Array &src, const size_t byteCount = 0, const size_t dstOffset = 0, const size_t srcOffset = 0)
+    {
+        size_t _byteCount = (byteCount == 0)?std::min(dst.getTotalBytes() - dstOffset, src.getTotalBytes() - srcOffset):byteCount;
+        Error::Check(cuMemcpyAtoA(*dst(), dstOffset, src(), srcOffset, _byteCount));
+    }
+    
+    void Memcpy(Memory &dst, const Array &src, const size_t byteCount = 0, const size_t srcOffset = 0)
+    {
+        size_t _byteCount = (byteCount == 0)?std::min(dst.getTotalBytes(), src.getTotalBytes() - srcOffset):byteCount;
+        Error::Check(cuMemcpyAtoD(*dst(), src(), srcOffset, _byteCount));
+    }
+    
+    void Memcpy(void *dst, const Array &src, const size_t byteCount = 0, const size_t srcOffset = 0)
+    {
+        size_t _byteCount = (byteCount == 0)?(src.getTotalBytes() - srcOffset):byteCount;
+        Error::Check(cuMemcpyAtoH(dst, src(), srcOffset, _byteCount));
+    }
+    
+    template<typename T>
+    void Memcpy(std::vector<T> &dst, const Array &src, const size_t byteCount = 0, const size_t srcOffset = 0)
+    {
+        size_t _byteCount = (byteCount == 0)?std::min(sizeof(T) * dst.size(), src.getTotalBytes() - srcOffset):byteCount;
+        Error::Check(cuMemcpyAtoH(dst.data(), src(), srcOffset, _byteCount));
+    }
+    
+    /*
+     cuMemcpyDto* wrapper
+     */
+    void Memcpy(Array &dst, const Memory &src, const size_t byteCount = 0, const size_t dstOffset = 0)
+    {
+        size_t _byteCount = (byteCount == 0)?std::min(dst.getTotalBytes() - dstOffset, src.getTotalBytes()):byteCount;
+        Error::Check(cuMemcpyDtoA(*dst(), dstOffset, src(), _byteCount));
+    }
+    
+    void Memcpy(Memory &dst, const Memory &src, const size_t byteCount = 0)
+    {
+        size_t _byteCount = (byteCount == 0)?std::min(dst.getTotalBytes(), src.getTotalBytes()):byteCount;
+        Error::Check(cuMemcpyDtoD(*dst(), src(), _byteCount));
+    }
+    
+    void Memcpy(void *dst, const Memory &src, const size_t byteCount = 0)
+    {
+        size_t _byteCount = (byteCount == 0)?src.getTotalBytes():byteCount;
+        Error::Check(cuMemcpyDtoH(dst, src(), _byteCount));
+    }
+    
+    template<typename T>
+    void Memcpy(std::vector<T> &dst, const Memory &src, const size_t byteCount = 0)
+    {
+        size_t _byteCount = (byteCount == 0)?std::min(sizeof(T) * dst.size(), src.getTotalBytes()):byteCount;
+        Error::Check(cuMemcpyDtoH(dst.data(), src(), _byteCount));
+    }
+    
+    /*
+     cuMemcpyHto* wrapper
+     */
+    void Memcpy(Array &dst, const void *src, const size_t byteCount = 0, const size_t dstOffset = 0)
+    {
+        size_t _byteCount = (byteCount == 0)?(dst.getTotalBytes() - dstOffset):byteCount;
+        Error::Check(cuMemcpyHtoA(*dst(), dstOffset, src, _byteCount));
+    }
+    
+    template<typename T>
+    void Memcpy(Array &dst, const std::vector<T> &src, const size_t byteCount = 0, const size_t dstOffset = 0)
+    {
+        size_t _byteCount = (byteCount == 0)?std::min(dst.getTotalBytes() - dstOffset, sizeof(T) * src.size()):byteCount;
+        Error::Check(cuMemcpyHtoA(*dst(), dstOffset, src.data(), _byteCount));
+    }
+    
+    void Memcpy(Memory &dst, const void *src, const size_t byteCount = 0)
+    {
+        size_t _byteCount = (byteCount == 0)?(dst.getTotalBytes()):byteCount;
+        Error::Check(cuMemcpyHtoD(*dst(), src, _byteCount));
+    }
+    
+    template<typename T>
+    void Memcpy(Memory &dst, const std::vector<T> &src, const size_t byteCount = 0)
+    {
+        size_t _byteCount = (byteCount == 0)?std::min(dst.getTotalBytes(), sizeof(T) * src.size()):byteCount;
+        Error::Check(cuMemcpyHtoD(*dst(), src.data(), _byteCount));
+    }
     
     /*
      CUtexref wrapper
@@ -702,7 +965,7 @@ namespace cu {
         
         void setMemory(const Memory &mem)
         {
-            Error::Check(cuTexRefSetAddress(nullptr, ref, mem(), mem.size()));
+            Error::Check(cuTexRefSetAddress(nullptr, ref, mem(), mem.getTotalBytes()));
         }
         
         void setAddressMode(const int dim, const CUaddress_mode mode)
