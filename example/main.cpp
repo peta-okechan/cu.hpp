@@ -74,12 +74,12 @@ int main(int argc, const char * argv[])
         
         // Arrayに関連付けたテクスチャリファレンスを用意してデータをコピー
         cu::TexRef tTwos(mod, "twos");
-        cu::Array dTwos = cu::Array::Create1D(CU_AD_FORMAT_FLOAT, 1, 10);
-        tTwos.setArray(dTwos);
+        cu::Array aTwos = cu::Array::Create1D(CU_AD_FORMAT_FLOAT, 1, 10);
+        tTwos.setArray(aTwos);
         tTwos.setAddressMode(0, CU_TR_ADDRESS_MODE_WRAP);
         tTwos.setFlags(CU_TRSF_NORMALIZED_COORDINATES);
         std::vector<float> hTwos = {2.0f, 12.0f, 22.0f, 32.0f, 42.0f, 52.0f, 62.0f, 72.0f, 82.0f, 92.0f};
-        cu::Memcpy(dTwos, hTwos);
+        cu::Memcpy(aTwos, hTwos);
         
         // 処理時間を計測
         cu::Timer timer;
