@@ -968,6 +968,11 @@ namespace cu {
             Error::Check(cuTexRefSetAddress(nullptr, ref, mem(), mem.getTotalBytes()));
         }
         
+        void setArray(const Array &array)
+        {
+            Error::Check(cuTexRefSetArray(ref, array(), CU_TRSA_OVERRIDE_FORMAT));
+        }
+        
         void setAddressMode(const int dim, const CUaddress_mode mode)
         {
             Error::Check(cuTexRefSetAddressMode(ref, dim, mode));
