@@ -168,6 +168,82 @@ namespace cu {
     };
     
     /*
+     Resource release templates. 
+     */
+    template<typename T>
+    void Release(const T value)
+    {
+        throw Error(CUDA_ERROR_UNKNOWN, "No releasable type.");
+    }
+    
+    template<>
+    void Release<CUcontext>(const CUcontext context)
+    {
+        Error::Check(cuCtxDestroy(context));
+    }
+    
+    template<>
+    void Release<CUmodule>(const CUmodule mod)
+    {
+        Error::Check(cuModuleUnload(mod));
+    }
+    
+    template<>
+    void Release<CUdeviceptr>(const CUdeviceptr ptr)
+    {
+        Error::Check(cuMemFree(ptr));
+    }
+    
+    template<>
+    void Release<CUevent>(const CUevent e)
+    {
+        Error::Check(cuEventDestroy(e));
+    }
+    
+    /*
+     CUDA Resource Manager
+     */
+    template<typename T>
+    class ResourceManager
+    {
+    private:
+        std::unordered_map<T, unsigned int> refCount;
+    public:
+        static ResourceManager* GetInstance()
+        {
+            static ResourceManager<T> *m = nullptr;
+            if (!m) m = new ResourceManager<T>();
+            return m;
+        }
+        
+        ResourceManager() {}
+        
+        ~ResourceManager() {}
+        
+        unsigned int retain(const T key)
+        {
+            refCount[key] += 1;
+            return refCount[key];
+        }
+        
+        unsigned int release(const T key)
+        {
+            if (refCount[key] > 0) {
+                refCount[key] -= 1;
+                if (refCount[key] == 0) {
+                    destroy(key);
+                }
+            }
+            return refCount[key];
+        }
+        
+        virtual void destroy(const T key)
+        {
+            Release<T>(key);
+        }
+    };
+    
+    /*
      cuInit wrapper
      */
     void Init(unsigned int flags = 0)
@@ -341,52 +417,21 @@ namespace cu {
      */
     class Context
     {
+        typedef ResourceManager<CUcontext> Manager;
     private:
-        class Manager
-        {
-            friend class Context;
-        private:
-            std::unordered_map<CUcontext, unsigned int> ctxRefCount;
-            
-            static Manager* GetInstance()
-            {
-                static Manager *m = nullptr;
-                if (!m) m = new Manager();
-                return m;
-            }
-            
-            Manager() {}
-            
-            ~Manager() {}
-            
-            unsigned int incl(const CUcontext &ctx)
-            {
-                ctxRefCount[ctx] += 1;
-                return ctxRefCount[ctx];
-            }
-            
-            unsigned int decl(const CUcontext &ctx)
-            {
-                if (ctxRefCount[ctx] > 0) {
-                    ctxRefCount[ctx] -= 1;
-                }
-                return ctxRefCount[ctx];
-            }
-        };
-        
         CUcontext ctx;
         
         Context(const CUcontext &_ctx)
         : ctx(_ctx)
         {
-            Manager::GetInstance()->incl(ctx);
+            Manager::GetInstance()->retain(ctx);
         }
         
     public:
         Context(Device device, unsigned int flags = CU_CTX_SCHED_AUTO)
         {
             Error::Check(cuCtxCreate(&ctx, flags, device()));
-            Manager::GetInstance()->incl(ctx);
+            Manager::GetInstance()->retain(ctx);
         }
         
         Context(const Context& _context)
@@ -395,9 +440,7 @@ namespace cu {
         
         ~Context()
         {
-            if (Manager::GetInstance()->decl(ctx) == 0) {
-                Error::Check(cuCtxDestroy(ctx));
-            }
+            Manager::GetInstance()->release(ctx);
         }
         
         bool operator==(const Context &rhs) const
@@ -520,17 +563,19 @@ namespace cu {
      */
     class Module
     {
+        typedef ResourceManager<CUmodule> Manager;
     private:
         CUmodule mod;
     public:
         Module(const std::string modulePath)
         {
             Error::Check(cuModuleLoad(&mod, modulePath.c_str()));
+            Manager::GetInstance()->retain(mod);
         }
         
         ~Module()
         {
-            Error::Check(cuModuleUnload(mod));
+            Manager::GetInstance()->release(mod);
         }
         
         CUmodule operator()(void) const
@@ -544,6 +589,7 @@ namespace cu {
      */
     class Memory
     {
+        typedef ResourceManager<CUdeviceptr> Manager;
     private:
         CUdeviceptr ptr;
         size_t byteCount;
@@ -551,12 +597,23 @@ namespace cu {
         Memory(const size_t _byteCount)
         : byteCount(_byteCount)
         {
-            Error::Check(cuMemAlloc(&ptr, _byteCount));
+            Error::Check(cuMemAlloc(&ptr, byteCount));
+            Manager::GetInstance()->retain(ptr);
+        }
+        
+        Memory(const Module &mod, const std::string name)
+        {
+            Error::Check(cuModuleGetGlobal(&ptr, &byteCount, mod(), name.c_str()));
+            /*
+             cuMemAlloc() と cuMemAllocPitch() 以外で取得した CUdeviceptr は
+             cuMemFree() で解放する必要はない（解放できない）ので
+             リソースマネージャには登録しない。
+             */
         }
         
         ~Memory()
         {
-            Error::Check(cuMemFree(ptr));
+            Manager::GetInstance()->release(ptr);
         }
         
         CUdeviceptr operator()(void) const
@@ -693,17 +750,19 @@ namespace cu {
      */
     class Event
     {
+        typedef ResourceManager<CUevent> Manager;
     private:
         CUevent e;
     public:
         Event(unsigned int flags = CU_EVENT_DEFAULT)
         {
             Error::Check(cuEventCreate(&e, flags));
+            Manager::GetInstance()->retain(e);
         }
         
         ~Event()
         {
-            Error::Check(cuEventDestroy(e));
+            Manager::GetInstance()->release(e);
         }
         
         CUevent operator()(void) const

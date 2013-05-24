@@ -6,6 +6,8 @@
 //  Copyright (c) 2013年 peta.okechan.net. All rights reserved.
 //
 
+__device__ float ones[10];
+
 extern "C"
 {
     __global__ void addone(float *v, int n)
@@ -13,7 +15,7 @@ extern "C"
         int index = blockDim.x * blockIdx.x + threadIdx.x;
 
         if (index < n) {
-            v[index] += 1.0f;
+            v[index] += ones[index % 10];
         }
     }
 }

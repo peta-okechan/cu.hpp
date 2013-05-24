@@ -57,15 +57,20 @@ int main(int argc, const char * argv[])
         context.getMemInfo(memFree, memTotal);
         std::cout << "Memory: total " << memTotal / 1024 / 1024 << "MB, free " << memFree / 1024 / 1024 << "MB\n";
         
-        // カーネルのロード
+        // モジュールのロード
         cu::Module mod("kernel.ptx");
         
-        // カーネル関数の取得
+        // カーネルの取得
         cu::Function addone(mod, "addone");
         
         // デバイスメモリにデータ領域を確保してホストからデータをコピー
         cu::Memory dData(sizeof(float) * hData.size());
         dData.copyFrom(hData);
+        
+        // モジュールのグローバル変数のポインタを取得しホストからデータからコピー
+        cu::Memory dOnes(mod, "ones");
+        std::vector<float> hOnes = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+        dOnes.copyFrom(hOnes);
         
         // 処理時間を計測
         cu::Timer timer;
