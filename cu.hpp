@@ -975,6 +975,9 @@ namespace cu {
         
         void setAddressMode(const int dim, const CUaddress_mode mode)
         {
+            /*
+             線形メモリを使う場合、およびsetFlagsで CU_TRSF_NORMALIZED_COORDINATES がセットされていない場合はmodeに何を指定しても CU_TR_ADDRESS_MODE_CLAMP 固定となるので注意。
+             */
             Error::Check(cuTexRefSetAddressMode(ref, dim, mode));
         }
         
