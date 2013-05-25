@@ -31,7 +31,11 @@
 #include <sstream>
 #include <vector>
 #include <unordered_map>
+#if defined(__APPLE__) || defined(__MACOSX)
 #include <CUDA/CUDA.h>
+#else
+#include <cuda.h>
+#endif
 
 namespace cu {
     
