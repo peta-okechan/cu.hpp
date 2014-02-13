@@ -36,7 +36,7 @@ int test()
         std::cout << "CUDA driver version: " << cu::GetDriverVersion() << "\n";
         
         // CUDAデバイスを取得
-        auto devices = cu::Device::GetDevices();
+        auto devices = cu::Device::all();
         if (devices.size() == 0) {
             printf("Error: No CUDA Device.\n");
             return EXIT_FAILURE;
@@ -60,7 +60,7 @@ int test()
         std::cout << "Memory: total " << memTotal / 1024 / 1024 << "MB, free " << memFree / 1024 / 1024 << "MB\n";
         
         // モジュールのロード
-        cu::Module mod = cu::Module::LoadFromFile("kernel.ptx");
+        cu::Module mod = cu::Module::loadFromFile("kernel.ptx");
         
         // カーネルの取得
         cu::Function addone(mod, "addone");
@@ -119,12 +119,6 @@ int test()
 int main(int argc, const char * argv[])
 {
     int ret = test();
-#ifdef CU_RESOURCE_LEAK_CHECK
-    std::cout << "Context CREATE: " << cu::RLC_context[cu::RES_CREATE] << ", RELEASE: " << cu::RLC_context[cu::RES_RELEASE] << "\n";
-    std::cout << "Module CREATE: " << cu::RLC_module[cu::RES_CREATE] << ", RELEASE: " << cu::RLC_module[cu::RES_RELEASE] << "\n";
-    std::cout << "Deviceptr CREATE: " << cu::RLC_deviceptr[cu::RES_CREATE] << ", RELEASE: " << cu::RLC_deviceptr[cu::RES_RELEASE] << "\n";
-    std::cout << "Array CREATE: " << cu::RLC_array[cu::RES_CREATE] << ", RELEASE: " << cu::RLC_array[cu::RES_RELEASE] << "\n";
-    std::cout << "Event CREATE: " << cu::RLC_event[cu::RES_CREATE] << ", RELEASE: " << cu::RLC_event[cu::RES_RELEASE] << "\n";
-#endif
+    
     return ret;
 }

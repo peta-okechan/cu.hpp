@@ -10,6 +10,7 @@
 		C31229C2174E1F1000BAC10A /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C31229C1174E1F1000BAC10A /* main.cpp */; };
 		C31229CB174E1F9400BAC10A /* CUDA.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C31229CA174E1F9400BAC10A /* CUDA.framework */; };
 		C31229CF174E215D00BAC10A /* kernel.cu in Sources */ = {isa = PBXBuildFile; fileRef = C31229CD174E202900BAC10A /* kernel.cu */; };
+		C3148A5518ACEB1900A6F5E2 /* kernel.ptx in CopyFiles */ = {isa = PBXBuildFile; fileRef = C3E44CB418ACEA430033AD66 /* kernel.ptx */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXBuildRule section */
@@ -22,19 +23,20 @@
 			outputFiles = (
 				"${INPUT_FILE_BASE}.ptx",
 			);
-			script = "cd \"$INPUT_FILE_DIR\"\n/usr/local/CUDA/bin/nvcc -arch=sm_11 -ptx \"$INPUT_FILE_NAME\"\\\n&& cp \"$INPUT_FILE_BASE\".ptx \"$TARGET_BUILD_DIR\"/\"$INPUT_FILE_BASE\".ptx";
+			script = "cd \"$INPUT_FILE_DIR\"\n/usr/local/CUDA/bin/nvcc -arch=sm_11 -ptx \"$INPUT_FILE_NAME\"";
 		};
 /* End PBXBuildRule section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		C31229BC174E1F1000BAC10A /* CopyFiles */ = {
+		C3148A5418ACEB1300A6F5E2 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = /usr/share/man/man1/;
-			dstSubfolderSpec = 0;
+			dstPath = "";
+			dstSubfolderSpec = 7;
 			files = (
+				C3148A5518ACEB1900A6F5E2 /* kernel.ptx in CopyFiles */,
 			);
-			runOnlyForDeploymentPostprocessing = 1;
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
@@ -45,6 +47,7 @@
 		C31229CC174E1FED00BAC10A /* cu.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = cu.hpp; sourceTree = "<group>"; };
 		C31229CD174E202900BAC10A /* kernel.cu */ = {isa = PBXFileReference; lastKnownFileType = text; path = kernel.cu; sourceTree = "<group>"; };
 		C31229D0174E28D400BAC10A /* README.md */ = {isa = PBXFileReference; lastKnownFileType = text; path = README.md; sourceTree = "<group>"; };
+		C3E44CB418ACEA430033AD66 /* kernel.ptx */ = {isa = PBXFileReference; lastKnownFileType = text; path = kernel.ptx; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -83,6 +86,7 @@
 			children = (
 				C31229C1174E1F1000BAC10A /* main.cpp */,
 				C31229CD174E202900BAC10A /* kernel.cu */,
+				C3E44CB418ACEA430033AD66 /* kernel.ptx */,
 			);
 			path = example;
 			sourceTree = "<group>";
@@ -96,7 +100,7 @@
 			buildPhases = (
 				C31229BA174E1F1000BAC10A /* Sources */,
 				C31229BB174E1F1000BAC10A /* Frameworks */,
-				C31229BC174E1F1000BAC10A /* CopyFiles */,
+				C3148A5418ACEB1300A6F5E2 /* CopyFiles */,
 			);
 			buildRules = (
 				C31229CE174E209400BAC10A /* PBXBuildRule */,
@@ -114,7 +118,7 @@
 		C31229B6174E1F1000BAC10A /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 0460;
+				LastUpgradeCheck = 0500;
 				ORGANIZATIONNAME = peta.okechan.net;
 			};
 			buildConfigurationList = C31229B9174E1F1000BAC10A /* Build configuration list for PBXProject "example" */;
@@ -151,7 +155,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
@@ -184,7 +187,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_WARN_CONSTANT_CONVERSION = YES;

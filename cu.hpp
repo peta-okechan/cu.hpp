@@ -26,11 +26,13 @@
 #ifndef cu_hpp
 #define cu_hpp
 
+#include <iostream>
 #include <exception>
 #include <string>
 #include <sstream>
 #include <vector>
-#include <unordered_map>
+#include <memory>
+#include <cassert>
 #if defined(__APPLE__) || defined(__MACOSX)
 #include <CUDA/CUDA.h>
 #else
@@ -38,19 +40,7 @@
 #endif
 
 namespace cu {
-    
-#ifdef CU_RESOURCE_LEAK_CHECK
-    enum {
-        RES_CREATE,
-        RES_RELEASE,
-    };
-    long RLC_context[] = {0, 0};
-    long RLC_module[] = {0, 0};
-    long RLC_deviceptr[] = {0, 0};
-    long RLC_array[] = {0, 0};
-    long RLC_event[] = {0, 0};
-#endif
-    
+
     /*
      Dimension
      for gridDim and blockDim
@@ -230,103 +220,6 @@ namespace cu {
     }
     
     /*
-     Resource release templates. 
-     */
-    template<typename T>
-    void Release(const T value)
-    {
-        throw Error(CUDA_ERROR_UNKNOWN, "No releasable type.");
-    }
-    
-    template<>
-    void Release<CUcontext>(const CUcontext context)
-    {
-        Error::Check(cuCtxDestroy(context));
-#ifdef CU_RESOURCE_LEAK_CHECK
-        RLC_context[RES_RELEASE]++;
-#endif
-    }
-    
-    template<>
-    void Release<CUmodule>(const CUmodule mod)
-    {
-        Error::Check(cuModuleUnload(mod));
-#ifdef CU_RESOURCE_LEAK_CHECK
-        RLC_module[RES_RELEASE]++;
-#endif
-    }
-    
-    template<>
-    void Release<CUdeviceptr>(const CUdeviceptr ptr)
-    {
-        Error::Check(cuMemFree(ptr));
-#ifdef CU_RESOURCE_LEAK_CHECK
-        RLC_deviceptr[RES_RELEASE]++;
-#endif
-    }
-    
-    template<>
-    void Release<CUarray>(const CUarray handle)
-    {
-        Error::Check(cuArrayDestroy(handle));
-#ifdef CU_RESOURCE_LEAK_CHECK
-        RLC_array[RES_RELEASE]++;
-#endif
-    }
-    
-    template<>
-    void Release<CUevent>(const CUevent e)
-    {
-        Error::Check(cuEventDestroy(e));
-#ifdef CU_RESOURCE_LEAK_CHECK
-        RLC_event[RES_RELEASE]++;
-#endif
-    }
-    
-    /*
-     CUDA Resource Manager
-     */
-    template<typename T>
-    class ResourceManager
-    {
-    private:
-        std::unordered_map<T, unsigned int> refCount;
-    public:
-        static ResourceManager* GetInstance()
-        {
-            static ResourceManager<T> *m = nullptr;
-            if (!m) m = new ResourceManager<T>();
-            return m;
-        }
-        
-        ResourceManager() {}
-        
-        ~ResourceManager() {}
-        
-        unsigned int retain(const T key)
-        {
-            refCount[key] += 1;
-            return refCount[key];
-        }
-        
-        unsigned int release(const T key)
-        {
-            if (refCount[key] > 0) {
-                refCount[key] -= 1;
-                if (refCount[key] == 0) {
-                    destroy(key);
-                }
-            }
-            return refCount[key];
-        }
-        
-        virtual void destroy(const T key)
-        {
-            Release<T>(key);
-        }
-    };
-    
-    /*
      cuInit wrapper
      */
     void Init(unsigned int flags = 0)
@@ -441,44 +334,48 @@ namespace cu {
      */
     class Device
     {
+        friend class Context;
+        
     private:
-        CUdevice device;
-    public:
-        Device(CUdevice _device)
-        : device(_device)
-        {}
+        std::shared_ptr<CUdevice> m_device;
         
-        ~Device() {}
-        
-        CUdevice operator()(void) const
+        Device()
+        : m_device()
         {
-            return device;
+            throw "Do not use default ctor.";
         }
         
-        std::string getName()
+        Device(CUdevice a_device)
+        : m_device()
+        {
+            m_device = std::make_shared<CUdevice>(a_device);
+        }
+        
+    public:
+        std::string getName() const
         {
             char name[100];
             int len = 100;
-            Error::Check(cuDeviceGetName(name, len, device));
-            return std::string(name);
+            Error::Check(cuDeviceGetName(name, len, *m_device));
+            return std::move(std::string(name));
         }
         
-        size_t getTotalMemBytes()
+        size_t getTotalMemBytes() const
         {
             size_t bytes = 0;
-            Error::Check(cuDeviceTotalMem(&bytes, device));
+            Error::Check(cuDeviceTotalMem(&bytes, *m_device));
             return bytes;
         }
         
         template<CUdevice_attribute attr>
-        int getAttribute()
+        int getAttribute() const
         {
             int ret = 0;
-            Error::Check(cuDeviceGetAttribute(&ret, attr, device));
+            Error::Check(cuDeviceGetAttribute(&ret, attr, *m_device));
             return ret;
         }
         
-        static std::vector<Device> GetDevices()
+        static std::vector<Device> all()
         {
             int count = 0;
             Error::Check(cuDeviceGetCount(&count));
@@ -491,7 +388,7 @@ namespace cu {
                 devices.push_back(Device(device));
             }
             
-            return devices;
+            return std::move(devices);
         }
     };
     
@@ -500,147 +397,135 @@ namespace cu {
      */
     class Context
     {
-        typedef ResourceManager<CUcontext> Manager;
     private:
-        CUcontext ctx;
+        Device m_device;
+        std::shared_ptr<CUctx_st> m_context;
         
-        Context(const CUcontext &_ctx)
-        : ctx(_ctx)
+        Context()
+        : m_context()
         {
-            Manager::GetInstance()->retain(ctx);
+            throw "Do not use default ctor.";
+        }
+        
+        Context(CUcontext a_context, Device a_device)
+        : m_context(), m_device(a_device)
+        {
+            m_context = std::shared_ptr<CUctx_st>(a_context, [](CUctx_st *ctx){
+                cuCtxDestroy(ctx);
+#ifdef DEBUG
+                std::cout << "cuCtxDestroy called." << std::endl;
+#endif
+            });
         }
         
     public:
-        Context(Device device, unsigned int flags = CU_CTX_SCHED_AUTO)
+        Context(Device a_device, unsigned int flags = CU_CTX_SCHED_AUTO)
+        : m_device(a_device)
         {
-            Error::Check(cuCtxCreate(&ctx, flags, device()));
-#ifdef CU_RESOURCE_LEAK_CHECK
-            RLC_context[RES_CREATE]++;
+            CUcontext ctx;
+            Error::Check(cuCtxCreate(&ctx, flags, *(m_device.m_device)));
+#ifdef DEBUG
+            std::cout << "cuCtxCreate called." << std::endl;
 #endif
-            Manager::GetInstance()->retain(ctx);
-        }
-        
-        Context(const Context& _context)
-        : Context(_context())
-        {}
-        
-        ~Context()
-        {
-            Manager::GetInstance()->release(ctx);
+            m_context = std::shared_ptr<CUctx_st>(ctx, [](CUctx_st *ctx){
+                cuCtxDestroy(ctx);
+#ifdef DEBUG
+                std::cout << "cuCtxDestroy called." << std::endl;
+#endif
+            });
         }
         
         bool operator==(const Context &rhs) const
         {
-            return (ctx == rhs());
+            return (m_context == rhs.m_context);
         }
         
-        CUcontext operator()(void) const
+        void setCurrent() const
         {
-            return ctx;
+            Error::Check(cuCtxSetCurrent(m_context.get()));
         }
         
-        CUfunc_cache getCacheConfig()
+        bool isCurrent() const
         {
+            CUcontext ctx;
+            Error::Check(cuCtxGetCurrent(&ctx));
+            return m_context.get() == ctx;
+        }
+        
+        CUfunc_cache getCacheConfig() const
+        {
+            assert(isCurrent());
+            
             CUfunc_cache config;
-            Context::push(*this);
             Error::Check(cuCtxGetCacheConfig(&config));
-            Context::pop();
             return config;
         }
         
-        Device getDevice()
+        Device getDevice() const
         {
-            CUdevice dev;
-            Context::push(*this);
-            Error::Check(cuCtxGetDevice(&dev));
-            Context::pop();
-            return Device(dev);
+            return m_device;
         }
         
         template<CUlimit limit>
-        size_t getLimit()
+        size_t getLimit() const
         {
+            assert(isCurrent());
+            
             size_t pvalue;
-            Context::push(*this);
             Error::Check(cuCtxGetLimit(&pvalue, limit));
-            Context::pop();
             return pvalue;
         }
         
-        CUsharedconfig getSharedMemConfig()
+        CUsharedconfig getSharedMemConfig() const
         {
+            assert(isCurrent());
+            
             CUsharedconfig pconfig;
-            Context::push(*this);
             Error::Check(cuCtxGetSharedMemConfig(&pconfig));
-            Context::pop();
             return pconfig;
         }
         
         void setCacheConfig(CUfunc_cache config)
         {
-            Context::push(*this);
+            assert(isCurrent());
+            
             Error::Check(cuCtxSetCacheConfig(config));
-            Context::pop();
         }
         
         template<CUlimit limit>
         void setLimit(size_t value)
         {
-            Context::push(*this);
+            assert(isCurrent());
+            
             Error::Check(cuCtxSetLimit(limit, value));
-            Context::pop();
         }
         
-        void getSharedMemConfig(CUsharedconfig config)
+        void getSharedMemConfig(CUsharedconfig config) const
         {
-            Context::push(*this);
+            assert(isCurrent());
+            
             Error::Check(cuCtxSetSharedMemConfig(config));
-            Context::pop();
         }
         
-        void synchronize()
+        void synchronize() const
         {
-            Context::push(*this);
+            assert(isCurrent());
+            
             Error::Check(cuCtxSynchronize());
-            Context::pop();
         }
         
-        unsigned int getApiVersion()
+        unsigned int getApiVersion() const
         {
             unsigned int version;
-            Error::Check(cuCtxGetApiVersion(ctx, &version));
+            Error::Check(cuCtxGetApiVersion(m_context.get(), &version));
             return version;
         }
         
         void getMemInfo(size_t &memFree, size_t &memTotal) const
         {
-            Context::push(*this);
+            assert(isCurrent());
+            
             Error::Check(cuMemGetInfo(&memFree, &memTotal));
-            Context::pop();
-        }
-        
-        static void push(const Context &context)
-        {
-            Error::Check(cuCtxPushCurrent(context()));
-        }
-        
-        static Context pop()
-        {
-            CUcontext ret;
-            Error::Check(cuCtxPopCurrent(&ret));
-            return Context(ret);
-        }
-        
-        static Context getCurrent()
-        {
-            CUcontext ctx;
-            Error::Check(cuCtxGetCurrent(&ctx));
-            return Context(ctx);
-        }
-        
-        static void setCurrent(const Context &_context)
-        {
-            Error::Check(cuCtxSetCurrent(_context()));
         }
     };
     
@@ -649,105 +534,230 @@ namespace cu {
      */
     class Module
     {
-        typedef ResourceManager<CUmodule> Manager;
+        friend class Memory;
+        friend class TexRef;
+        friend class Function;
+        
     private:
-        CUmodule mod;
+        std::shared_ptr<CUmod_st> m_module;
         
-        Module(const CUmodule _mod)
-        : mod(_mod)
+        Module()
+        : m_module()
         {
-            Manager::GetInstance()->retain(mod);
-        }
-    public:        
-        ~Module()
-        {
-            Manager::GetInstance()->release(mod);
+            throw "Do not use default ctor.";
         }
         
-        CUmodule operator()(void) const
+        Module(CUmodule a_module)
+        : m_module()
         {
-            return mod;
+            m_module = std::shared_ptr<CUmod_st>(a_module, [](CUmod_st *mod){
+                cuModuleUnload(mod);
+#ifdef DEBUG
+                std::cout << "cuModuleUnload called." << std::endl;
+#endif
+            });
         }
         
-        static Module LoadFromFile(const std::string modulePath)
+    public:
+        static Module loadFromFile(const std::string &modulePath)
         {
             CUmodule mod;
             Error::Check(cuModuleLoad(&mod, modulePath.c_str()));
-#ifdef CU_RESOURCE_LEAK_CHECK
-            RLC_module[RES_CREATE]++;
+#ifdef DEBUG
+            std::cout << "cuModuleLoad called." << std::endl;
 #endif
             return Module(mod);
         }
         
-        static Module LoadFromImage(const void* image)
+        static Module loadFromImage(const void *image)
         {
             CUmodule mod;
             Error::Check(cuModuleLoadData(&mod, image));
-#ifdef CU_RESOURCE_LEAK_CHECK
-            RLC_module[RES_CREATE]++;
+#ifdef DEBUG
+            std::cout << "cuModuleLoadData called." << std::endl;
 #endif
             return Module(mod);
         }
         
-        static Module LoadFromFatBinary(const void* fatCubin)
+        static Module loadFromFatBinary(const void *fatCubin)
         {
             CUmodule mod;
             Error::Check(cuModuleLoadFatBinary(&mod, fatCubin));
-#ifdef CU_RESOURCE_LEAK_CHECK
-            RLC_module[RES_CREATE]++;
+#ifdef DEBUG
+            std::cout << "cuModuleLoadFatBinary called." << std::endl;
 #endif
             return Module(mod);
         }
     };
     
     /*
+     Memcpy forward decls.
+     */
+    class Memory;
+    class Array;
+    void Memcpy(Array &dst, const Array &src, const size_t byteCount = 0, const size_t dstOffset = 0, const size_t srcOffset = 0);
+    void Memcpy(Memory &dst, const Array &src, const size_t byteCount = 0, const size_t srcOffset = 0);
+    void Memcpy(void *dst, const Array &src, const size_t byteCount = 0, const size_t srcOffset = 0);
+    template<typename T>
+    void Memcpy(std::vector<T> &dst, const Array &src, const size_t byteCount = 0, const size_t srcOffset = 0);
+    void Memcpy(Array &dst, const Memory &src, const size_t byteCount = 0, const size_t dstOffset = 0);
+    void Memcpy(Memory &dst, const Memory &src, const size_t byteCount = 0);
+    void Memcpy(void *dst, const Memory &src, const size_t byteCount = 0);
+    template<typename T>
+    void Memcpy(std::vector<T> &dst, const Memory &src, const size_t byteCount = 0);
+    void Memcpy(Array &dst, const void *src, const size_t byteCount = 0, const size_t dstOffset = 0);
+    template<typename T>
+    void Memcpy(Array &dst, const std::vector<T> &src, const size_t byteCount = 0, const size_t dstOffset = 0);
+    void Memcpy(Memory &dst, const void *src, const size_t byteCount = 0);
+    template<typename T>
+    void Memcpy(Memory &dst, const std::vector<T> &src, const size_t byteCount = 0);
+    
+    /*
      CUdeviceptr wrapper
      */
     class Memory
     {
-        typedef ResourceManager<CUdeviceptr> Manager;
+        friend class TexRef;
+        friend class Function;
+        friend void Memcpy(Memory &dst, const Array &src, const size_t byteCount, const size_t srcOffset);
+        friend void Memcpy(Array &dst, const Memory &src, const size_t byteCount, const size_t dstOffset);
+        friend void Memcpy(Memory &dst, const Memory &src, const size_t byteCount);
+        friend void Memcpy(void *dst, const Memory &src, const size_t byteCount);
+        template<typename T> friend void Memcpy(std::vector<T> &dst, const Memory &src, const size_t byteCount);
+        friend void Memcpy(Memory &dst, const void *src, const size_t byteCount);
+        template<typename T> friend void Memcpy(Memory &dst, const std::vector<T> &src, const size_t byteCount);
+        
     private:
-        CUdeviceptr ptr;
-        size_t byteCount;
-    public:
-        Memory(const size_t _byteCount)
-        : byteCount(_byteCount)
+        std::shared_ptr<CUdeviceptr> m_devptr;
+        size_t m_byteCount;
+        
+        Memory()
+        : m_devptr()
         {
-            Error::Check(cuMemAlloc(&ptr, byteCount));
-#ifdef CU_RESOURCE_LEAK_CHECK
-            RLC_deviceptr[RES_CREATE]++;
+            throw "Do not use default ctor.";
+        }
+        
+        Memory(CUdeviceptr a_devptr, size_t const a_byteCount)
+        : m_devptr(), m_byteCount(a_byteCount)
+        {
+            m_devptr = std::shared_ptr<CUdeviceptr>(new CUdeviceptr(a_devptr), [](CUdeviceptr *devptr){
+                cuMemFree(*devptr);
+#ifdef DEBUG
+                std::cout << "cuMemFree called." << std::endl;
 #endif
-            Manager::GetInstance()->retain(ptr);
+            });
+        }
+        
+    public:
+        Memory(const size_t a_byteCount)
+        : m_byteCount(a_byteCount)
+        {
+            CUdeviceptr devptr;
+            Error::Check(cuMemAlloc(&devptr, m_byteCount));
+#ifdef DEBUG
+            std::cout << "cuMemAlloc called." << std::endl;
+#endif
+            m_devptr = std::shared_ptr<CUdeviceptr>(new CUdeviceptr(devptr), [](CUdeviceptr *devptr){
+                cuMemFree(*devptr);
+#ifdef DEBUG
+                std::cout << "cuMemFree called." << std::endl;
+#endif
+            });
         }
         
         Memory(const Module &mod, const std::string name)
         {
-            Error::Check(cuModuleGetGlobal(&ptr, &byteCount, mod(), name.c_str()));
+            CUdeviceptr devptr;
+            Error::Check(cuModuleGetGlobal(&devptr, &m_byteCount, mod.m_module.get(), name.c_str()));
+            m_devptr = std::make_shared<CUdeviceptr>(devptr);
             /*
              cuMemAlloc() と cuMemAllocPitch() 以外で取得した CUdeviceptr は
              cuMemFree() で解放する必要はない（解放できない）ので
-             リソースマネージャには登録しない。
+             カスタムデリータは指定しない
              */
-        }
-        
-        ~Memory()
-        {
-            Manager::GetInstance()->release(ptr);
-        }
-        
-        CUdeviceptr operator()(void) const
-        {
-            return ptr;
-        }
-        
-        CUdeviceptr* operator()(void)
-        {
-            return &ptr;
         }
         
         size_t getTotalBytes(void) const
         {
-            return byteCount;
+            return m_byteCount;
+        }
+    };
+    
+    /*
+     Array Descriptor
+     */
+    class Descriptor
+    {
+        friend class Array;
+        
+    private:
+        bool is3D;
+        size_t width, height, depth;
+        CUarray_format format;
+        unsigned int numChannels, flags;
+        
+        Descriptor()
+        {
+            
+        }
+        
+    public:
+        Descriptor(const bool _is3D, const size_t _width, const size_t _height, const size_t _depth, const CUarray_format _format, const unsigned int _numChannels, const unsigned int _flags)
+        : is3D(_is3D), width(_width), height(_height), depth(_depth), format(_format), numChannels(_numChannels), flags(_flags)
+        {}
+        
+        Descriptor(const CUDA_ARRAY_DESCRIPTOR &desc)
+        : is3D(false), width(desc.Width), height(desc.Height), depth(1), format(desc.Format), numChannels(desc.NumChannels), flags(0)
+        {}
+        
+        Descriptor(const CUDA_ARRAY3D_DESCRIPTOR &desc)
+        : is3D(false), width(desc.Width), height(desc.Height), depth(desc.Depth), format(desc.Format), numChannels(desc.NumChannels), flags(desc.Flags)
+        {}
+        
+        size_t getTotalBytes() const
+        {
+            return FormatSize(format) * numChannels * width * height * depth;
+        }
+        
+        void getDescriptor(CUDA_ARRAY_DESCRIPTOR &desc) const
+        {
+            if (is3D) throw Error(CUDA_ERROR_UNKNOWN, "This is not 1D or 2D descriptor.");
+            desc.Width = width;
+            desc.Height = height;
+            desc.Format = format;
+            desc.NumChannels = numChannels;
+        }
+        
+        void getDescriptor(CUDA_ARRAY3D_DESCRIPTOR &desc) const
+        {
+            if (!is3D) throw Error(CUDA_ERROR_UNKNOWN, "This is not 3D descriptor.");
+            desc.Width = width;
+            desc.Height = height;
+            desc.Depth = depth;
+            desc.Format = format;
+            desc.NumChannels = numChannels;
+            desc.Flags = flags;
+        }
+        
+        void update(const CUarray handle)
+        {
+            if (is3D) {
+                CUDA_ARRAY3D_DESCRIPTOR _desc;
+                Error::Check(cuArray3DGetDescriptor(&_desc, handle));
+                width = _desc.Width;
+                height = _desc.Height;
+                format = _desc.Format;
+                numChannels = _desc.NumChannels;
+                depth = _desc.Depth;
+                flags = _desc.Flags;
+            } else {
+                CUDA_ARRAY_DESCRIPTOR _desc;
+                Error::Check(cuArrayGetDescriptor(&_desc, handle));
+                width = _desc.Width;
+                height = _desc.Height;
+                format = _desc.Format;
+                numChannels = _desc.NumChannels;
+            }
         }
     };
     
@@ -756,130 +766,75 @@ namespace cu {
      */
     class Array
     {
-        typedef ResourceManager<CUarray> Manager;
+        friend class TexRef;
+        friend void Memcpy(Array &dst, const Array &src, const size_t byteCount, const size_t dstOffset, const size_t srcOffset);
+        friend void Memcpy(Memory &dst, const Array &src, const size_t byteCount, const size_t srcOffset);
+        friend void Memcpy(void *dst, const Array &src, const size_t byteCount, const size_t srcOffset);
+        template<typename T> friend void Memcpy(std::vector<T> &dst, const Array &src, const size_t byteCount, const size_t srcOffset);
+        friend void Memcpy(Array &dst, const Memory &src, const size_t byteCount, const size_t dstOffset);
+        friend void Memcpy(Array &dst, const void *src, const size_t byteCount, const size_t dstOffset);
+        template<typename T> friend void Memcpy(Array &dst, const std::vector<T> &src, const size_t byteCount, const size_t dstOffset);
+        
     private:
-        class Descriptor
-        {
-        private:
-            bool is3D;
-            size_t width, height, depth;
-            CUarray_format format;
-            unsigned int numChannels, flags;
-        public:
-            Descriptor(const bool _is3D, const size_t _width, const size_t _height, const size_t _depth, const CUarray_format _format, const unsigned int _numChannels, const unsigned int _flags)
-            : is3D(_is3D), width(_width), height(_height), depth(_depth), format(_format), numChannels(_numChannels), flags(_flags)
-            {}
-            
-            Descriptor(const CUDA_ARRAY_DESCRIPTOR &desc)
-            : is3D(false), width(desc.Width), height(desc.Height), depth(1), format(desc.Format), numChannels(desc.NumChannels), flags(0)
-            {}
-            
-            Descriptor(const CUDA_ARRAY3D_DESCRIPTOR &desc)
-            : is3D(false), width(desc.Width), height(desc.Height), depth(desc.Depth), format(desc.Format), numChannels(desc.NumChannels), flags(desc.Flags)
-            {}
-            
-            size_t getTotalBytes() const
-            {
-                return FormatSize(format) * numChannels * width * height * depth;
-            }
-            
-            void getDescriptor(CUDA_ARRAY_DESCRIPTOR &desc) const
-            {
-                if (is3D) throw Error(CUDA_ERROR_UNKNOWN, "This is not 1D or 2D descriptor.");
-                desc.Width = width;
-                desc.Height = height;
-                desc.Format = format;
-                desc.NumChannels = numChannels;
-            }
-            
-            void getDescriptor(CUDA_ARRAY3D_DESCRIPTOR &desc) const
-            {
-                if (!is3D) throw Error(CUDA_ERROR_UNKNOWN, "This is not 3D descriptor.");
-                desc.Width = width;
-                desc.Height = height;
-                desc.Depth = depth;
-                desc.Format = format;
-                desc.NumChannels = numChannels;
-                desc.Flags = flags;
-            }
-            
-            void arrayCreate(CUarray &handle)
-            {
-                if (is3D) {
-                    CUDA_ARRAY3D_DESCRIPTOR desc;
-                    getDescriptor(desc);
-                    Error::Check(cuArray3DCreate(&handle, &desc));
-#ifdef CU_RESOURCE_LEAK_CHECK
-                    RLC_array[RES_CREATE]++;
-#endif
-                } else {
-                    CUDA_ARRAY_DESCRIPTOR desc;
-                    getDescriptor(desc);
-                    Error::Check(cuArrayCreate(&handle, &desc));
-#ifdef CU_RESOURCE_LEAK_CHECK
-                    RLC_array[RES_CREATE]++;
-#endif
-                }
-            }
-            
-            void update(const CUarray handle)
-            {
-                if (is3D) {
-                    CUDA_ARRAY3D_DESCRIPTOR _desc;
-                    Error::Check(cuArray3DGetDescriptor(&_desc, handle));
-                    width = _desc.Width;
-                    height = _desc.Height;
-                    format = _desc.Format;
-                    numChannels = _desc.NumChannels;
-                    depth = _desc.Depth;
-                    flags = _desc.Flags;
-                } else {
-                    CUDA_ARRAY_DESCRIPTOR _desc;
-                    Error::Check(cuArrayGetDescriptor(&_desc, handle));
-                    width = _desc.Width;
-                    height = _desc.Height;
-                    format = _desc.Format;
-                    numChannels = _desc.NumChannels;
-                }
-            }
-        };
+        std::shared_ptr<CUarray_st> m_array;
+        Descriptor m_descriptor;
         
-        CUarray handle;
-        Descriptor desc;
+        Array()
+        : m_array()
+        {
+            throw "Do not use default ctor.";
+        }
+        
+        Array(CUarray a_array, Descriptor const &a_descriptor)
+        : m_array(), m_descriptor(a_descriptor)
+        {
+            m_array = std::shared_ptr<CUarray_st>(a_array, [](CUarray_st *array){
+                cuArrayDestroy(array);
+#ifdef DEBUG
+                std::cout << "cuArrayDestroy called." << std::endl;
+#endif
+            });
+        }
+        
     public:
-        Array(const Descriptor &_desc)
-        : desc(_desc)
+        Array(const Descriptor &a_descriptor)
+        : m_descriptor(a_descriptor)
         {
-            desc.arrayCreate(handle);
-            Manager::GetInstance()->retain(handle);
-        }
-        
-        ~Array()
-        {
-            Manager::GetInstance()->release(handle);
-        }
-        
-        CUarray operator()(void) const
-        {
-            return handle;
-        }
-        
-        CUarray* operator()(void)
-        {
-            return &handle;
+            CUarray array;
+            if (m_descriptor.is3D) {
+                CUDA_ARRAY3D_DESCRIPTOR desc;
+                m_descriptor.getDescriptor(desc);
+                Error::Check(cuArray3DCreate(&array, &desc));
+#ifdef DEBUG
+                std::cout << "cuArray3DCreate called." << std::endl;
+#endif
+            } else {
+                CUDA_ARRAY_DESCRIPTOR desc;
+                m_descriptor.getDescriptor(desc);
+                Error::Check(cuArrayCreate(&array, &desc));
+#ifdef DEBUG
+                std::cout << "cuArrayCreate called." << std::endl;
+#endif
+            }
+            m_array = std::shared_ptr<CUarray_st>(array, [](CUarray_st *array){
+                cuArrayDestroy(array);
+#ifdef DEBUG
+                std::cout << "cuArrayDestroy called." << std::endl;
+#endif
+            });
         }
         
         Descriptor getDescriptor(const bool useCache = true)
         {
             if (!useCache) {
-                desc.update(handle);
+                m_descriptor.update(m_array.get());
             }
-            return desc;
+            return m_descriptor;
         }
         
         size_t getTotalBytes() const
         {
-            return desc.getTotalBytes();
+            return m_descriptor.getTotalBytes();
         }
         
         static Array Create1D(const CUarray_format Format, const unsigned int NumChannels, const unsigned int width)
@@ -918,86 +873,86 @@ namespace cu {
     /*
      cuMemcpyAto* wrapper
      */
-    void Memcpy(Array &dst, const Array &src, const size_t byteCount = 0, const size_t dstOffset = 0, const size_t srcOffset = 0)
+    void Memcpy(Array &dst, const Array &src, const size_t byteCount, const size_t dstOffset, const size_t srcOffset)
     {
         size_t _byteCount = (byteCount == 0)?std::min(dst.getTotalBytes() - dstOffset, src.getTotalBytes() - srcOffset):byteCount;
-        Error::Check(cuMemcpyAtoA(*dst(), dstOffset, src(), srcOffset, _byteCount));
+        Error::Check(cuMemcpyAtoA(dst.m_array.get(), dstOffset, src.m_array.get(), srcOffset, _byteCount));
     }
     
-    void Memcpy(Memory &dst, const Array &src, const size_t byteCount = 0, const size_t srcOffset = 0)
+    void Memcpy(Memory &dst, const Array &src, const size_t byteCount, const size_t srcOffset)
     {
         size_t _byteCount = (byteCount == 0)?std::min(dst.getTotalBytes(), src.getTotalBytes() - srcOffset):byteCount;
-        Error::Check(cuMemcpyAtoD(*dst(), src(), srcOffset, _byteCount));
+        Error::Check(cuMemcpyAtoD(*(dst.m_devptr), src.m_array.get(), srcOffset, _byteCount));
     }
     
-    void Memcpy(void *dst, const Array &src, const size_t byteCount = 0, const size_t srcOffset = 0)
+    void Memcpy(void *dst, const Array &src, const size_t byteCount, const size_t srcOffset)
     {
         size_t _byteCount = (byteCount == 0)?(src.getTotalBytes() - srcOffset):byteCount;
-        Error::Check(cuMemcpyAtoH(dst, src(), srcOffset, _byteCount));
+        Error::Check(cuMemcpyAtoH(dst, src.m_array.get(), srcOffset, _byteCount));
     }
     
     template<typename T>
-    void Memcpy(std::vector<T> &dst, const Array &src, const size_t byteCount = 0, const size_t srcOffset = 0)
+    void Memcpy(std::vector<T> &dst, const Array &src, const size_t byteCount, const size_t srcOffset)
     {
         size_t _byteCount = (byteCount == 0)?std::min(sizeof(T) * dst.size(), src.getTotalBytes() - srcOffset):byteCount;
-        Error::Check(cuMemcpyAtoH(dst.data(), src(), srcOffset, _byteCount));
+        Error::Check(cuMemcpyAtoH(dst.data(), *(src.m_array), srcOffset, _byteCount));
     }
     
     /*
      cuMemcpyDto* wrapper
      */
-    void Memcpy(Array &dst, const Memory &src, const size_t byteCount = 0, const size_t dstOffset = 0)
+    void Memcpy(Array &dst, const Memory &src, const size_t byteCount, const size_t dstOffset)
     {
         size_t _byteCount = (byteCount == 0)?std::min(dst.getTotalBytes() - dstOffset, src.getTotalBytes()):byteCount;
-        Error::Check(cuMemcpyDtoA(*dst(), dstOffset, src(), _byteCount));
+        Error::Check(cuMemcpyDtoA(dst.m_array.get(), dstOffset, *(src.m_devptr), _byteCount));
     }
     
-    void Memcpy(Memory &dst, const Memory &src, const size_t byteCount = 0)
+    void Memcpy(Memory &dst, const Memory &src, const size_t byteCount)
     {
         size_t _byteCount = (byteCount == 0)?std::min(dst.getTotalBytes(), src.getTotalBytes()):byteCount;
-        Error::Check(cuMemcpyDtoD(*dst(), src(), _byteCount));
+        Error::Check(cuMemcpyDtoD(*(dst.m_devptr), *(src.m_devptr), _byteCount));
     }
     
-    void Memcpy(void *dst, const Memory &src, const size_t byteCount = 0)
+    void Memcpy(void *dst, const Memory &src, const size_t byteCount)
     {
         size_t _byteCount = (byteCount == 0)?src.getTotalBytes():byteCount;
-        Error::Check(cuMemcpyDtoH(dst, src(), _byteCount));
+        Error::Check(cuMemcpyDtoH(dst, *(src.m_devptr), _byteCount));
     }
     
     template<typename T>
-    void Memcpy(std::vector<T> &dst, const Memory &src, const size_t byteCount = 0)
+    void Memcpy(std::vector<T> &dst, const Memory &src, const size_t byteCount)
     {
         size_t _byteCount = (byteCount == 0)?std::min(sizeof(T) * dst.size(), src.getTotalBytes()):byteCount;
-        Error::Check(cuMemcpyDtoH(dst.data(), src(), _byteCount));
+        Error::Check(cuMemcpyDtoH(dst.data(), *(src.m_devptr), _byteCount));
     }
     
     /*
      cuMemcpyHto* wrapper
      */
-    void Memcpy(Array &dst, const void *src, const size_t byteCount = 0, const size_t dstOffset = 0)
+    void Memcpy(Array &dst, const void *src, const size_t byteCount, const size_t dstOffset)
     {
         size_t _byteCount = (byteCount == 0)?(dst.getTotalBytes() - dstOffset):byteCount;
-        Error::Check(cuMemcpyHtoA(*dst(), dstOffset, src, _byteCount));
+        Error::Check(cuMemcpyHtoA(dst.m_array.get(), dstOffset, src, _byteCount));
     }
     
     template<typename T>
-    void Memcpy(Array &dst, const std::vector<T> &src, const size_t byteCount = 0, const size_t dstOffset = 0)
+    void Memcpy(Array &dst, const std::vector<T> &src, const size_t byteCount, const size_t dstOffset)
     {
         size_t _byteCount = (byteCount == 0)?std::min(dst.getTotalBytes() - dstOffset, sizeof(T) * src.size()):byteCount;
-        Error::Check(cuMemcpyHtoA(*dst(), dstOffset, src.data(), _byteCount));
+        Error::Check(cuMemcpyHtoA(dst.m_array.get(), dstOffset, src.data(), _byteCount));
     }
     
-    void Memcpy(Memory &dst, const void *src, const size_t byteCount = 0)
+    void Memcpy(Memory &dst, const void *src, const size_t byteCount)
     {
         size_t _byteCount = (byteCount == 0)?(dst.getTotalBytes()):byteCount;
-        Error::Check(cuMemcpyHtoD(*dst(), src, _byteCount));
+        Error::Check(cuMemcpyHtoD(*(dst.m_devptr), src, _byteCount));
     }
     
     template<typename T>
-    void Memcpy(Memory &dst, const std::vector<T> &src, const size_t byteCount = 0)
+    void Memcpy(Memory &dst, const std::vector<T> &src, const size_t byteCount)
     {
         size_t _byteCount = (byteCount == 0)?std::min(dst.getTotalBytes(), sizeof(T) * src.size()):byteCount;
-        Error::Check(cuMemcpyHtoD(*dst(), src.data(), _byteCount));
+        Error::Check(cuMemcpyHtoD(*(dst.m_devptr), src.data(), _byteCount));
     }
     
     /*
@@ -1010,19 +965,19 @@ namespace cu {
     public:
         TexRef(const Module &mod, const std::string name)
         {
-            Error::Check(cuModuleGetTexRef(&ref, mod(), name.c_str()));
+            Error::Check(cuModuleGetTexRef(&ref, mod.m_module.get(), name.c_str()));
         }
         
         ~TexRef() {}
         
         void setMemory(const Memory &mem)
         {
-            Error::Check(cuTexRefSetAddress(nullptr, ref, mem(), mem.getTotalBytes()));
+            Error::Check(cuTexRefSetAddress(nullptr, ref, *(mem.m_devptr), mem.getTotalBytes()));
         }
         
         void setArray(const Array &array)
         {
-            Error::Check(cuTexRefSetArray(ref, array(), CU_TRSA_OVERRIDE_FORMAT));
+            Error::Check(cuTexRefSetArray(ref, array.m_array.get(), CU_TRSA_OVERRIDE_FORMAT));
         }
         
         void setAddressMode(const int dim, const CUaddress_mode mode)
@@ -1060,7 +1015,7 @@ namespace cu {
     public:
         Function(const Module &mod, const std::string name)
         {
-            Error::Check(cuModuleGetFunction(&func, mod(), name.c_str()));
+            Error::Check(cuModuleGetFunction(&func, mod.m_module.get(), name.c_str()));
         }
         
         ~Function() {}
@@ -1079,7 +1034,28 @@ namespace cu {
         
         Function& setArg(Memory &value)
         {
-            args.push_back(value());
+            args.push_back(&(*(value.m_devptr)));
+            return *this;
+        }
+        
+        template<typename T>
+        Function& setArg(const unsigned int index, T &value)
+        {
+            if (index < args.size()) {
+                args[index] = &value;
+            } else {
+                setArg(value);
+            }
+            return *this;
+        }
+        
+        Function& setArg(const unsigned int index, Memory &value)
+        {
+            if (index < args.size()) {
+                args[index] = &(*(value.m_devptr));
+            } else {
+                setArg(value);
+            }
             return *this;
         }
         
@@ -1094,42 +1070,57 @@ namespace cu {
      */
     class Event
     {
-        typedef ResourceManager<CUevent> Manager;
+        friend class Timer;
+        
     private:
-        CUevent e;
+        std::shared_ptr<CUevent_st> m_event;
+        
+        Event()
+        : m_event()
+        {
+            throw "Do not use default ctor.";
+        }
+        
+        Event(CUevent a_event)
+        : m_event()
+        {
+            m_event = std::shared_ptr<CUevent_st>(a_event, [](CUevent_st *event){
+                cuEventDestroy(event);
+#ifdef DEBUG
+                std::cout << "cuEventDestroy called." << std::endl;
+#endif
+            });
+        }
+        
     public:
         Event(unsigned int flags = CU_EVENT_DEFAULT)
         {
-            Error::Check(cuEventCreate(&e, flags));
-#ifdef CU_RESOURCE_LEAK_CHECK
-            RLC_event[RES_CREATE]++;
+            CUevent event;
+            Error::Check(cuEventCreate(&event, flags));
+#ifdef DEBUG
+            std::cout << "cuEventCreate called." << std::endl;
 #endif
-            Manager::GetInstance()->retain(e);
-        }
-        
-        ~Event()
-        {
-            Manager::GetInstance()->release(e);
-        }
-        
-        CUevent operator()(void) const
-        {
-            return e;
+            m_event = std::shared_ptr<CUevent_st>(event, [](CUevent_st *event){
+                cuEventDestroy(event);
+#ifdef DEBUG
+                std::cout << "cuEventDestroy called." << std::endl;
+#endif
+            });
         }
         
         void record(const CUstream &hStream = 0)
         {
-            Error::Check(cuEventRecord(e, hStream));
+            Error::Check(cuEventRecord(m_event.get(), hStream));
         }
         
         void query()
         {
-            Error::Check(cuEventQuery(e));
+            Error::Check(cuEventQuery(m_event.get()));
         }
         
         void synchronize()
         {
-            Error::Check(cuEventSynchronize(e));
+            Error::Check(cuEventSynchronize(m_event.get()));
         }
     };
     
@@ -1163,7 +1154,7 @@ namespace cu {
         float elapsedMilliSec()
         {
             float msec;
-            Error::Check(cuEventElapsedTime(&msec, begin(), end()));
+            Error::Check(cuEventElapsedTime(&msec, begin.m_event.get(), end.m_event.get()));
             return msec;
         }
     };
