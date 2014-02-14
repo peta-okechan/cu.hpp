@@ -339,12 +339,6 @@ namespace cu {
     private:
         std::shared_ptr<CUdevice> m_device;
         
-        Device()
-        : m_device()
-        {
-            throw "Do not use default ctor.";
-        }
-        
         Device(CUdevice a_device)
         : m_device()
         {
@@ -352,8 +346,16 @@ namespace cu {
         }
         
     public:
+        Device()
+        : m_device()
+        {
+            
+        }
+        
         std::string getName() const
         {
+            assert(m_device);
+            
             char name[100];
             int len = 100;
             Error::Check(cuDeviceGetName(name, len, *m_device));
@@ -362,6 +364,8 @@ namespace cu {
         
         size_t getTotalMemBytes() const
         {
+            assert(m_device);
+            
             size_t bytes = 0;
             Error::Check(cuDeviceTotalMem(&bytes, *m_device));
             return bytes;
@@ -370,6 +374,8 @@ namespace cu {
         template<CUdevice_attribute attr>
         int getAttribute() const
         {
+            assert(m_device);
+            
             int ret = 0;
             Error::Check(cuDeviceGetAttribute(&ret, attr, *m_device));
             return ret;
@@ -401,12 +407,6 @@ namespace cu {
         Device m_device;
         std::shared_ptr<CUctx_st> m_context;
         
-        Context()
-        : m_context()
-        {
-            throw "Do not use default ctor.";
-        }
-        
         Context(CUcontext a_context, Device a_device)
         : m_context(), m_device(a_device)
         {
@@ -419,6 +419,12 @@ namespace cu {
         }
         
     public:
+        Context()
+        : m_context()
+        {
+            
+        }
+        
         Context(Device a_device, unsigned int flags = CU_CTX_SCHED_AUTO)
         : m_device(a_device)
         {
@@ -437,16 +443,22 @@ namespace cu {
         
         bool operator==(const Context &rhs) const
         {
+            assert(m_context);
+            
             return (m_context == rhs.m_context);
         }
         
         void setCurrent() const
         {
+            assert(m_context);
+            
             Error::Check(cuCtxSetCurrent(m_context.get()));
         }
         
         bool isCurrent() const
         {
+            assert(m_context);
+            
             CUcontext ctx;
             Error::Check(cuCtxGetCurrent(&ctx));
             return m_context.get() == ctx;
@@ -463,6 +475,8 @@ namespace cu {
         
         Device getDevice() const
         {
+            assert(m_context);
+            
             return m_device;
         }
         
@@ -516,6 +530,8 @@ namespace cu {
         
         unsigned int getApiVersion() const
         {
+            assert(m_context);
+            
             unsigned int version;
             Error::Check(cuCtxGetApiVersion(m_context.get(), &version));
             return version;
@@ -541,12 +557,6 @@ namespace cu {
     private:
         std::shared_ptr<CUmod_st> m_module;
         
-        Module()
-        : m_module()
-        {
-            throw "Do not use default ctor.";
-        }
-        
         Module(CUmodule a_module)
         : m_module()
         {
@@ -559,6 +569,12 @@ namespace cu {
         }
         
     public:
+        Module()
+        : m_module()
+        {
+            
+        }
+        
         static Module loadFromFile(const std::string &modulePath)
         {
             CUmodule mod;
@@ -631,12 +647,6 @@ namespace cu {
         std::shared_ptr<CUdeviceptr> m_devptr;
         size_t m_byteCount;
         
-        Memory()
-        : m_devptr()
-        {
-            throw "Do not use default ctor.";
-        }
-        
         Memory(CUdeviceptr a_devptr, size_t const a_byteCount)
         : m_devptr(), m_byteCount(a_byteCount)
         {
@@ -649,6 +659,12 @@ namespace cu {
         }
         
     public:
+        Memory()
+        : m_devptr()
+        {
+            
+        }
+        
         Memory(const size_t a_byteCount)
         : m_byteCount(a_byteCount)
         {
@@ -679,6 +695,8 @@ namespace cu {
         
         size_t getTotalBytes(void) const
         {
+            assert(m_devptr);
+            
             return m_byteCount;
         }
     };
@@ -696,12 +714,12 @@ namespace cu {
         CUarray_format format;
         unsigned int numChannels, flags;
         
+    public:
         Descriptor()
         {
             
         }
         
-    public:
         Descriptor(const bool _is3D, const size_t _width, const size_t _height, const size_t _depth, const CUarray_format _format, const unsigned int _numChannels, const unsigned int _flags)
         : is3D(_is3D), width(_width), height(_height), depth(_depth), format(_format), numChannels(_numChannels), flags(_flags)
         {}
@@ -779,12 +797,6 @@ namespace cu {
         std::shared_ptr<CUarray_st> m_array;
         Descriptor m_descriptor;
         
-        Array()
-        : m_array()
-        {
-            throw "Do not use default ctor.";
-        }
-        
         Array(CUarray a_array, Descriptor const &a_descriptor)
         : m_array(), m_descriptor(a_descriptor)
         {
@@ -797,6 +809,12 @@ namespace cu {
         }
         
     public:
+        Array()
+        : m_array()
+        {
+            
+        }
+        
         Array(const Descriptor &a_descriptor)
         : m_descriptor(a_descriptor)
         {
@@ -826,6 +844,8 @@ namespace cu {
         
         Descriptor getDescriptor(const bool useCache = true)
         {
+            assert(m_array);
+            
             if (!useCache) {
                 m_descriptor.update(m_array.get());
             }
@@ -834,6 +854,8 @@ namespace cu {
         
         size_t getTotalBytes() const
         {
+            assert(m_array);
+            
             return m_descriptor.getTotalBytes();
         }
         
@@ -961,8 +983,13 @@ namespace cu {
     class TexRef
     {
     private:
-        CUtexref ref;
+        CUtexref ref = nullptr;
     public:
+        TexRef()
+        {
+            
+        }
+        
         TexRef(const Module &mod, const std::string name)
         {
             Error::Check(cuModuleGetTexRef(&ref, mod.m_module.get(), name.c_str()));
@@ -972,16 +999,21 @@ namespace cu {
         
         void setMemory(const Memory &mem)
         {
+            assert(ref);
+            
             Error::Check(cuTexRefSetAddress(nullptr, ref, *(mem.m_devptr), mem.getTotalBytes()));
         }
         
         void setArray(const Array &array)
         {
+            assert(ref);
+            
             Error::Check(cuTexRefSetArray(ref, array.m_array.get(), CU_TRSA_OVERRIDE_FORMAT));
         }
         
         void setAddressMode(const int dim, const CUaddress_mode mode)
         {
+            assert(ref);
             /*
              線形メモリを使う場合、およびsetFlagsで CU_TRSF_NORMALIZED_COORDINATES がセットされていない場合はmodeに何を指定しても CU_TR_ADDRESS_MODE_CLAMP 固定となるので注意。
              */
@@ -990,16 +1022,22 @@ namespace cu {
         
         void setFilterMode(const CUfilter_mode mode)
         {
+            assert(ref);
+            
             Error::Check(cuTexRefSetFilterMode(ref, mode));
         }
         
         void setFlags(unsigned int flags)
         {
+            assert(ref);
+            
             Error::Check(cuTexRefSetFlags(ref, flags));
         }
         
         void setFormat(const CUarray_format format, const int numPackedComponents)
         {
+            assert(ref);
+            
             Error::Check(cuTexRefSetFormat(ref, format, numPackedComponents));
         }
     };
@@ -1010,9 +1048,14 @@ namespace cu {
     class Function
     {
     private:
-        CUfunction func;
+        CUfunction func = nullptr;
         std::vector<void*> args;
     public:
+        Function()
+        {
+            
+        }
+        
         Function(const Module &mod, const std::string name)
         {
             Error::Check(cuModuleGetFunction(&func, mod.m_module.get(), name.c_str()));
@@ -1020,20 +1063,26 @@ namespace cu {
         
         ~Function() {}
         
-        CUfunction operator()(void) const
+        void resetArg()
         {
-            return func;
+            assert(func);
+            
+            args.clear();
         }
         
         template<typename T>
         Function& setArg(T &value)
         {
+            assert(func);
+            
             args.push_back(&value);
             return *this;
         }
         
         Function& setArg(Memory &value)
         {
+            assert(func);
+            
             args.push_back(&(*(value.m_devptr)));
             return *this;
         }
@@ -1041,6 +1090,8 @@ namespace cu {
         template<typename T>
         Function& setArg(const unsigned int index, T &value)
         {
+            assert(func);
+            
             if (index < args.size()) {
                 args[index] = &value;
             } else {
@@ -1051,6 +1102,8 @@ namespace cu {
         
         Function& setArg(const unsigned int index, Memory &value)
         {
+            assert(func);
+            
             if (index < args.size()) {
                 args[index] = &(*(value.m_devptr));
             } else {
@@ -1061,6 +1114,8 @@ namespace cu {
         
         void launchKernel(const Dim3 &gridDim, const Dim3 &blockDim, unsigned int sharedMemBytes = 0, CUstream hStream = nullptr, void** extra = nullptr)
         {
+            assert(func);
+            
             Error::Check(cuLaunchKernel(func, gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y, blockDim.z, sharedMemBytes, hStream, args.data(), extra));
         }
     };
@@ -1075,12 +1130,6 @@ namespace cu {
     private:
         std::shared_ptr<CUevent_st> m_event;
         
-        Event()
-        : m_event()
-        {
-            throw "Do not use default ctor.";
-        }
-        
         Event(CUevent a_event)
         : m_event()
         {
@@ -1093,6 +1142,12 @@ namespace cu {
         }
         
     public:
+        Event()
+        : m_event()
+        {
+            
+        }
+        
         Event(unsigned int flags = CU_EVENT_DEFAULT)
         {
             CUevent event;
@@ -1110,16 +1165,22 @@ namespace cu {
         
         void record(const CUstream &hStream = 0)
         {
+            assert(m_event);
+            
             Error::Check(cuEventRecord(m_event.get(), hStream));
         }
         
         void query()
         {
+            assert(m_event);
+            
             Error::Check(cuEventQuery(m_event.get()));
         }
         
         void synchronize()
         {
+            assert(m_event);
+            
             Error::Check(cuEventSynchronize(m_event.get()));
         }
     };

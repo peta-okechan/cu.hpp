@@ -88,6 +88,7 @@ int test()
         timer.start();
         
         // カーネルの実行
+        addone.resetArg();
         addone.setArg(dData).setArg(n);
         addone.launchKernel(gridDim, blockDim);
         
